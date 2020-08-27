@@ -13,34 +13,6 @@
 #include <thrust/binary_search.h>
 
 namespace xgboost {
-
-// Find a gidx value for a given feature otherwise return -1 if not found
-__forceinline__ __device__ int BinarySearchRow(
-    bst_uint begin, bst_uint end,
-    common::CompressedIterator<uint32_t> data,
-    int const fidx_begin, int const fidx_end) {
-  bst_uint previous_middle = UINT32_MAX;
-  while (end != begin) {
-    auto middle = begin + (end - begin) / 2;
-    if (middle == previous_middle) {
-      break;
-    }
-    previous_middle = middle;
-
-    auto gidx = data[middle];
-
-    if (gidx >= fidx_begin && gidx < fidx_end) {
-      return gidx;
-    } else if (gidx < fidx_begin) {
-      begin = middle;
-    } else {
-      end = middle;
-    }
-  }
-  // Value is missing
-  return -1;
-}
-
 /** \brief Struct for accessing and manipulating an ellpack matrix on the
  * device. Does not own underlying memory and may be trivially copied into
  * kernels.*/
@@ -83,11 +55,11 @@ struct EllpackDeviceAccessor {
     if (is_dense) {
       gidx = gidx_iter[row_begin + fidx];
     } else {
-      gidx = BinarySearchRow(row_begin,
-                             row_end,
-                             gidx_iter,
-                             feature_segments[fidx],
-                             feature_segments[fidx + 1]);
+      gidx = common::BinarySearchBin(row_begin,
+                                     row_end,
+                                     gidx_iter,
+                                     feature_segments[fidx],
+                                     feature_segments[fidx + 1]);
     }
     return gidx;
   }
@@ -149,7 +121,7 @@ class EllpackPageImpl {
 
   EllpackPageImpl(int device, common::HistogramCuts cuts,
                   const SparsePage& page,
-                  bool is_dense,size_t row_stride);
+                  bool is_dense, size_t row_stride);
 
   /*!
    * \brief Constructor from an existing DMatrix.
@@ -159,10 +131,12 @@ class EllpackPageImpl {
    */
   explicit EllpackPageImpl(DMatrix* dmat, const BatchParam& parm);
 
-  template <typename AdapterT>
-  explicit EllpackPageImpl(AdapterT* adapter, float missing, bool is_dense, int nthread,
-                           int max_bin, common::Span<size_t> row_counts_span,
-                           size_t row_stride);
+  template <typename AdapterBatch>
+  explicit EllpackPageImpl(AdapterBatch batch, float missing, int device, bool is_dense, int nthread,
+                           common::Span<size_t> row_counts_span,
+                           size_t row_stride, size_t n_rows, size_t n_cols,
+                           common::HistogramCuts const& cuts);
+
   /*! \brief Copy the elements of the given ELLPACK page into this page.
    *
    * @param device The GPU device to use.

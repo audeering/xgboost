@@ -48,7 +48,6 @@
 
 // trees
 #include "../src/tree/param.cc"
-#include "../src/tree/split_evaluator.cc"
 #include "../src/tree/tree_model.cc"
 #include "../src/tree/tree_updater.cc"
 #include "../src/tree/updater_colmaker.cc"
@@ -57,7 +56,6 @@
 #include "../src/tree/updater_refresh.cc"
 #include "../src/tree/updater_sync.cc"
 #include "../src/tree/updater_histmaker.cc"
-#include "../src/tree/updater_skmaker.cc"
 #include "../src/tree/constraints.cc"
 
 // linear
@@ -69,14 +67,15 @@
 #include "../src/learner.cc"
 #include "../src/logging.cc"
 #include "../src/common/common.cc"
+#include "../src/common/random.cc"
 #include "../src/common/charconv.cc"
 #include "../src/common/timer.cc"
+#include "../src/common/quantile.cc"
 #include "../src/common/host_device_vector.cc"
 #include "../src/common/hist_util.cc"
 #include "../src/common/json.cc"
 #include "../src/common/io.cc"
 #include "../src/common/survival_util.cc"
-#include "../src/common/probability_distribution.cc"
 #include "../src/common/version.cc"
 
 // c_api

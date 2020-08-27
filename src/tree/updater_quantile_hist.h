@@ -125,7 +125,22 @@ class QuantileHistMaker: public TreeUpdater {
   void LoadConfig(Json const& in) override {
     auto const& config = get<Object const>(in);
     FromJson(config.at("train_param"), &this->param_);
-    FromJson(config.at("cpu_hist_train_param"), &this->hist_maker_param_);
+    try {
+      FromJson(config.at("cpu_hist_train_param"), &this->hist_maker_param_);
+    } catch (std::out_of_range& e) {
+      // XGBoost model is from 1.1.x, so 'cpu_hist_train_param' is missing.
+      // We add this compatibility check because it's just recently that we (developers) began
+      // persuade R users away from using saveRDS() for model serialization. Hopefully, one day,
+      // everyone will be using xgb.save().
+      LOG(WARNING) << "Attempted to load interal configuration for a model file that was generated "
+        << "by a previous version of XGBoost. A likely cause for this warning is that the model "
+        << "was saved with saveRDS() in R or pickle.dump() in Python. We strongly ADVISE AGAINST "
+        << "using saveRDS() or pickle.dump() so that the model remains accessible in current and "
+        << "upcoming XGBoost releases. Please use xgb.save() instead to preserve models for the "
+        << "long term. For more details and explanation, see "
+        << "https://xgboost.readthedocs.io/en/latest/tutorials/saving_model.html";
+      this->hist_maker_param_.UpdateAllowUnknown(Args{});
+    }
   }
   void SaveConfig(Json* p_out) const override {
     auto& out = *p_out;
@@ -188,11 +203,11 @@ class QuantileHistMaker: public TreeUpdater {
     // constructor
     explicit Builder(const TrainParam& param,
                      std::unique_ptr<TreeUpdater> pruner,
-                     std::unique_ptr<SplitEvaluator> spliteval,
                      FeatureInteractionConstraintHost int_constraints_,
                      DMatrix const* fmat)
-      : param_(param), pruner_(std::move(pruner)),
-        spliteval_(std::move(spliteval)),
+      : param_(param),
+        tree_evaluator_(param, fmat->Info().num_col_, GenericParameter::kCpuId),
+        pruner_(std::move(pruner)),
         interaction_constraints_{std::move(int_constraints_)},
         p_last_tree_(nullptr), p_last_fmat_(fmat) {
       builder_monitor_.Init("Quantile::Builder");
@@ -247,10 +262,12 @@ class QuantileHistMaker: public TreeUpdater {
       int depth;
       bst_float loss_chg;
       unsigned timestamp;
-      ExpandEntry(int nid, int sibling_nid, int depth, bst_float loss_chg, unsigned tstmp):
-        nid(nid), sibling_nid(sibling_nid), depth(depth), loss_chg(loss_chg), timestamp(tstmp) {}
+      ExpandEntry(int nid, int sibling_nid, int depth, bst_float loss_chg,
+                  unsigned tstmp)
+          : nid(nid), sibling_nid(sibling_nid), depth(depth),
+            loss_chg(loss_chg), timestamp(tstmp) {}
 
-      bool IsValid(TrainParam const& param, int32_t num_leaves) const {
+      bool IsValid(TrainParam const &param, int32_t num_leaves) const {
         bool ret = loss_chg <= kRtEps ||
                    (param.max_depth > 0 && this->depth == param.max_depth) ||
                    (param.max_leaves > 0 && num_leaves == param.max_leaves);
@@ -299,9 +316,11 @@ class QuantileHistMaker: public TreeUpdater {
     // Returns the sum of gradients corresponding to the data points that contains a non-missing
     // value for the particular feature fid.
     template <int d_step>
-    GradStats EnumerateSplit(const GHistIndexMatrix &gmat, const GHistRowT &hist,
-                             const NodeEntry &snode, SplitEntry *p_best,
-                             bst_uint fid, bst_uint nodeID) const;
+    GradStats EnumerateSplit(
+        const GHistIndexMatrix &gmat, const GHistRowT &hist,
+        const NodeEntry &snode, SplitEntry *p_best, bst_uint fid,
+        bst_uint nodeID,
+        TreeEvaluator::SplitEvaluator<TrainParam> const &evaluator) const;
 
     // if sum of statistics for non-missing values in the node
     // is equal to sum of statistics for all values:
@@ -392,6 +411,7 @@ class QuantileHistMaker: public TreeUpdater {
     HistCollection<GradientSumT> hist_;
     /*! \brief culmulative local parent histogram of gradients. */
     HistCollection<GradientSumT> hist_local_worker_;
+    TreeEvaluator tree_evaluator_;
     /*! \brief feature with least # of bins. to be used for dense specialization
                of InitNewNode() */
     uint32_t fid_least_bins_;
@@ -400,7 +420,6 @@ class QuantileHistMaker: public TreeUpdater {
 
     GHistBuilder<GradientSumT> hist_builder_;
     std::unique_ptr<TreeUpdater> pruner_;
-    std::unique_ptr<SplitEvaluator> spliteval_;
     FeatureInteractionConstraintHost interaction_constraints_;
 
     static constexpr size_t kPartitionBlockSize = 2048;
@@ -447,7 +466,6 @@ class QuantileHistMaker: public TreeUpdater {
   std::unique_ptr<Builder<double>> double_builder_;
 
   std::unique_ptr<TreeUpdater> pruner_;
-  std::unique_ptr<SplitEvaluator> spliteval_;
   FeatureInteractionConstraintHost int_constraint_;
 };
 
